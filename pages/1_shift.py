@@ -60,6 +60,9 @@ if not current_day:
 
 is_closed = (current_day.status == "CLOSED")
 
+if is_closed:
+    st.info("🔒 هذه الوردية مغلقة حالياً. (يمكنك إعادة فتحها للتعديل من زر أسفل الصفحة)")
+
 # ==========================================
 # 1. رصيد بداية اليوم
 # ==========================================
@@ -75,7 +78,7 @@ st.markdown("---")
 # ==========================================
 st.subheader("📋 الطلبات")
 
-# عدادات الإيراد
+# عدادات الإيراد اللحظية
 cash_rev = calculate_cash_revenue(db, current_day.id)
 insta_rev = calculate_insta_revenue(db, current_day.id)
 total_rev = calculate_total_revenue(db, current_day.id)
@@ -92,7 +95,7 @@ time_slots = [
     "11:30 - 1:00", "12:00 - 1:00", "12:00 - 1:30" ,"1:00 - 2:00", "1:30 - 3:00", "2:00 - 3:00"
 ]
 
-# نموذج الإدخال السريع
+# نموذج إضافة طلب جديد (يظهر فقط إذا كان اليوم مفتوحاً)
 if not is_closed:
     with st.expander("➕ إضافة طلب جديد", expanded=True):
         with st.form("quick_order_form", clear_on_submit=True):
@@ -102,9 +105,7 @@ if not is_closed:
                 o_name = st.text_input("اسم العميل 👤")
                 o_sub = st.checkbox("☑️ اشتراك")
             with o_col2:
-                # خانة السعر تبدأ فاضية تماماً لتسهيل الكتابة
                 o_price_input = st.number_input("السعر (ج.م) 💵", min_value=0, value=None, step=10, placeholder="اكتب السعر...")
-                # طريقة الدفع تبدأ بـ None افتراضياً
                 o_pay = st.selectbox("طريقة الدفع 💳", ["None", "Cash", "Insta"])
                 o_notes = st.text_input("ملاحظات 📝")
                 
@@ -113,7 +114,6 @@ if not is_closed:
                 if o_pay == "Cash": pm = PaymentMethod.cash
                 elif o_pay == "Insta": pm = PaymentMethod.insta
                 
-                # تحويل السعر إلى رقم
                 o_price = float(o_price_input) if o_price_input is not None else 0.0
                 real_price = o_price if pm != PaymentMethod.none else 0.0
                     
@@ -130,7 +130,7 @@ if not is_closed:
                 st.success("تم حفظ الطلب بنجاح!")
                 st.rerun()
 
-# عرض الطلبات مرتبة زمنياً من الصغير للكبير
+# عرض الطلبات مرتبة زمنياً
 orders = db.query(Order).filter(Order.business_day_id == current_day.id).all()
 orders.sort(key=lambda o: time_slots.index(o.order_time) if o.order_time in time_slots else 999)
 
@@ -141,6 +141,7 @@ if orders:
         c_ord1.write(f"⏰ **{o.order_time}** | 👤 {o.customer_name} {'(اشتراك)' if o.is_subscription else ''}")
         c_ord2.write(f"💰 {o.price:,.2f} ج.م ({o.payment_method.value})")
         
+        # زراير التعديل والحذف تظهر فقط لو اليوم مفتوح
         if not is_closed:
             if c_ord3.button("✏️", key=f"edit_btn_{o.id}"):
                 st.session_state['editing_order_id'] = o.id
@@ -150,7 +151,7 @@ if orders:
                 db.commit()
                 st.rerun()
 
-        # نافذة التعديل السريع
+        # نافذة التعديل
         if st.session_state.get('editing_order_id') == o.id:
             with st.form(f"edit_form_{o.id}"):
                 st.info(f"تعديل طلب: {o.customer_name}")
@@ -212,7 +213,6 @@ if not is_closed:
             with ec1:
                 expense_emp = st.selectbox("الموظف / الشخص", emp_names)
                 expense_type = st.selectbox("نوع الخارج", cat_names)
-                # خانة مبلغ المصروف تبدأ فاضية تماماً أيضاً لتسهيل الكتابة
                 exp_amt_input = st.number_input("المبلغ", min_value=0, value=None, step=10, placeholder="اكتب المبلغ...")
             with ec2:
                 expense_source = st.selectbox("يُخصم من", ["الداخل", "عهدة كاش", "عهدة انستا"])
@@ -248,7 +248,7 @@ if expenses:
 st.markdown("---")
 
 # ==========================================
-# 4. رصيد نهاية اليوم
+# 4. رصيد نهاية اليوم وإغلاق/إعادة فتح الوردية
 # ==========================================
 st.subheader("📊 رصيد نهاية اليوم")
 
@@ -264,14 +264,23 @@ rc3.info(f"**عهدة انستا:** {curr_insta_treasury:,.2f} ج.م")
 
 st.warning(f"### 🛡️ إجمالي العهد والمسؤولية: {total_resp:,.2f} ج.م")
 
+# التحكم في إغلاق وإعادة فتح الوردية
 if not is_closed:
-    if st.button("🔒 إغلاق الوردية", type="primary", use_container_width=True):
+    if st.button("🔒 إغلاق الوردية (تجميد الحسابات)", type="primary", use_container_width=True):
         current_day.status = "CLOSED"
         current_day.closing_inside = curr_inside
         current_day.closing_cash_treasury = curr_cash_treasury
         current_day.closing_insta_treasury = curr_insta_treasury
         db.commit()
         st.success("تم إغلاق الوردية بنجاح!")
+        st.rerun()
+else:
+    st.write("---")
+    st.warning("⚠️ هذه الوردية مغلقة. إذا أردت تعديل أي طلب أو مصروف، اضغط على الزر التالي لإعادة فتحها:")
+    if st.button("🔓 إعادة فتح الوردية للتعديل", type="secondary", use_container_width=True):
+        current_day.status = "OPEN"
+        db.commit()
+        st.success("تم إعادة فتح الوردية بنجاح! يمكنك الآن التعديل وإعادة الإغلاق.")
         st.rerun()
 
 db.close()
