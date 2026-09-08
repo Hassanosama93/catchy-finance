@@ -10,22 +10,19 @@ from services.calculations import (
     calculate_total_responsibility
 )
 
-# كود CSS مخصص للموبايل لجعل الأزرار والقوائم كبيرة ومريحة للمس
+# كود CSS مخصص للموبايل
 st.markdown("""
 <style>
     @media (max-width: 768px) {
-        /* تكبير الأزرار للموبايل */
         .stButton>button {
             min-height: 48px !important;
             font-size: 16px !important;
             width: 100% !important;
         }
-        /* تكبير حقول الإدخال والأسهم لسهولة الضغط */
         input, select, div[data-baseweb="select"] {
             min-height: 45px !important;
             font-size: 16px !important;
         }
-        /* ترتيب الكروت 2 في السطر على الموبايل */
         div[data-testid="column"] {
             flex: 1 1 calc(50% - 10px) !important;
             min-width: 130px !important;
@@ -75,7 +72,7 @@ col_b3.metric("عهدة انستا", f"{current_day.opening_insta_treasury:,.2f}
 st.markdown("---")
 
 # ==========================================
-# 2. قسم الطلبات (إدخال سريع للموبايل بلمسة واحدة)
+# 2. قسم الطلبات
 # ==========================================
 st.subheader("📋 الطلبات")
 
@@ -96,7 +93,7 @@ time_slots = [
     "11:30 - 1:00", "12:00 - 1:30", "1:00 - 2:00", "1:30 - 3:00", "2:00 - 3:00"
 ]
 
-# نموذج الإدخال السريع (لمسة واحدة للقوائم)
+# نموذج الإدخال السريع
 if not is_closed:
     with st.expander("➕ إضافة طلب جديد (سريع)", expanded=True):
         with st.form("quick_order_form", clear_on_submit=True):
@@ -104,32 +101,35 @@ if not is_closed:
             with o_col1:
                 o_time = st.selectbox("الوقت ⏰", time_slots)
                 o_name = st.text_input("اسم العميل 👤")
-                o_sub = st.checkbox("☑️ اشتراك ")
+                o_sub = st.checkbox("☑️ اشتراك")
             with o_col2:
-                o_price = st.number_input("السعر  💵", min_value=0.0, step=10.0)
+                o_price = st.number_input("السعر (ج.م) 💵", min_value=0.0, step=10.0)
                 o_pay = st.selectbox("طريقة الدفع 💳", ["Cash", "Insta", "None"])
-                o_notes = st.text_input("ملاحظات  📝")
+                o_notes = st.text_input("ملاحظات (مثل: تجديد اشتراك / غسيل مجاني) 📝")
                 
             if st.form_submit_button("حفظ الطلب 💾", type="primary", use_container_width=True):
+                # ضبط طريقة الدفع
                 pm = PaymentMethod.none
-                if not o_sub:
-                    if o_pay == "Cash": pm = PaymentMethod.cash
-                    elif o_pay == "Insta": pm = PaymentMethod.insta
+                if o_pay == "Cash": pm = PaymentMethod.cash
+                elif o_pay == "Insta": pm = PaymentMethod.insta
+                
+                # السعر يؤخذ كما هو ما دامت طريقة الدفع ليست None
+                real_price = float(o_price) if pm != PaymentMethod.none else 0.0
                     
                 db.add(Order(
                     business_day_id=current_day.id,
                     order_time=o_time,
                     customer_name=o_name.strip() if o_name else "بدون اسم",
                     is_subscription=o_sub,
-                    price=0.0 if o_sub else o_price,
+                    price=real_price,
                     payment_method=pm,
                     notes=o_notes
                 ))
                 db.commit()
-                st.success("تم حفظ الطلب!")
+                st.success("تم حفظ الطلب بنجاح!")
                 st.rerun()
 
-# عرض الطلبات المسجلة اليوم مع إمكانية حذف أي طلب
+# عرض الطلبات المسجلة اليوم
 orders = db.query(Order).filter(Order.business_day_id == current_day.id).all()
 if orders:
     st.write(f"##### الطلبات المسجلة ({len(orders)} طلب):")
@@ -137,7 +137,7 @@ if orders:
         c_ord1, c_ord2, c_ord3, c_ord4 = st.columns([2, 3, 2, 1])
         c_ord1.write(f"⏰ {o.order_time}")
         c_ord2.write(f"👤 {o.customer_name} {'(اشتراك)' if o.is_subscription else ''}")
-        c_ord3.write(f"💰 {o.price} ج.م ({o.payment_method.value})")
+        c_ord3.write(f"💰 {o.price:,.2f} ج.م ({o.payment_method.value})")
         if not is_closed:
             if c_ord4.button("❌", key=f"del_ord_{o.id}"):
                 db.delete(o)
@@ -165,7 +165,7 @@ if not is_closed:
         with st.form("expense_form", clear_on_submit=True):
             ec1, ec2 = st.columns(2)
             with ec1:
-                expense_emp = st.selectbox("الموظف ", emp_names)
+                expense_emp = st.selectbox("الموظف / الشخص", emp_names)
                 expense_type = st.selectbox("نوع الخارج", cat_names)
                 expense_amount = st.number_input("المبلغ", min_value=0.0, step=10.0)
             with ec2:
@@ -190,7 +190,7 @@ if expenses:
     for e in expenses:
         col_ex1, col_ex2, col_ex3 = st.columns([3, 3, 1])
         col_ex1.write(f"👤 **{e.person_entity}** ({e.expense_type})")
-        col_ex2.write(f"💸 {e.amount} ج.م من ({e.source.value})")
+        col_ex2.write(f"💸 {e.amount:,.2f} ج.م من ({e.source.value})")
         if not is_closed:
             if col_ex3.button("❌", key=f"del_exp_{e.id}"):
                 db.delete(e)
@@ -215,16 +215,16 @@ rc1.info(f"**داخل:** {curr_inside:,.2f} ج.م")
 rc2.info(f"**عهدة كاش:** {curr_cash_treasury:,.2f} ج.م")
 rc3.info(f"**عهدة انستا:** {curr_insta_treasury:,.2f} ج.م")
 
-st.warning(f"### 🛡️ إجمالي الفلوس: {total_resp:,.2f} ج.م")
+st.warning(f"### 🛡️ إجمالي العهد والمسؤولية: {total_resp:,.2f} ج.م")
 
 if not is_closed:
-    if st.button("🔒 إغلاق الشيفت", type="primary", use_container_width=True):
+    if st.button("🔒 إغلاق الوردية", type="primary", use_container_width=True):
         current_day.status = "CLOSED"
         current_day.closing_inside = curr_inside
         current_day.closing_cash_treasury = curr_cash_treasury
         current_day.closing_insta_treasury = curr_insta_treasury
         db.commit()
-        st.success("تم إغلاق الشيفت بنجاح!")
+        st.success("تم إغلاق الوردية بنجاح!")
         st.rerun()
 
 db.close()
