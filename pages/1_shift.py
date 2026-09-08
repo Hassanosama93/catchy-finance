@@ -2,30 +2,21 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 from database.connection import get_db
-from database.models import Order, Expense, PaymentMethod, ExpenseSource, BusinessDay, Employee, ExpenseCategory
+from database.models import Order, Expense, PaymentMethod, ExpenseSource, BusinessDay, Employee, ExpenseCategory, TreasuryMovement, TreasuryType, MovementType
 from services.calculations import (
     calculate_cash_revenue, calculate_insta_revenue, calculate_total_revenue,
     calculate_expenses_by_source, calculate_inside_balance,
     calculate_cash_treasury_balance, calculate_insta_treasury_balance,
-    calculate_total_responsibility
+    calculate_total_responsibility, calculate_treasury_net_movements
 )
 
 # كود CSS مخصص للموبايل
 st.markdown("""
 <style>
     @media (max-width: 768px) {
-        .stButton>button {
-            min-height: 44px !important;
-            font-size: 15px !important;
-        }
-        input, select, div[data-baseweb="select"] {
-            min-height: 45px !important;
-            font-size: 16px !important;
-        }
-        div[data-testid="column"] {
-            flex: 1 1 calc(50% - 10px) !important;
-            min-width: 130px !important;
-        }
+        .stButton>button { min-height: 44px !important; font-size: 15px !important; }
+        input, select, div[data-baseweb="select"] { min-height: 45px !important; font-size: 16px !important; }
+        div[data-testid="column"] { flex: 1 1 calc(50% - 10px) !important; min-width: 130px !important; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -41,12 +32,11 @@ st.title(f"Shift - {st.session_state['current_region_name']}")
 
 selected_date = st.date_input("📅 تاريخ اليوم:", date.today())
 
-# البحث عن يوم العمل
+# جلب أو إنشاء اليوم
 current_day = db.query(BusinessDay).filter(
     BusinessDay.region_id == region_id, BusinessDay.business_date == selected_date
 ).first()
 
-# البحث عن آخر يوم مغلق قبل هذا التاريخ
 prev_closed_day = db.query(BusinessDay).filter(
     BusinessDay.region_id == region_id,
     BusinessDay.business_date < selected_date,
@@ -62,21 +52,6 @@ if not current_day:
     )
     db.add(current_day)
     db.commit()
-else:
-    # تحديث رصيد البداية تلقائياً لو اليوم مفتوح وتم تقفيل اليوم السابق
-    if current_day.status == "OPEN" and prev_closed_day:
-        p_in = prev_closed_day.closing_inside or 0.0
-        p_cash = prev_closed_day.closing_cash_treasury or 0.0
-        p_insta = prev_closed_day.closing_insta_treasury or 0.0
-        
-        if (current_day.opening_inside != p_in or 
-            current_day.opening_cash_treasury != p_cash or 
-            current_day.opening_insta_treasury != p_insta):
-            
-            current_day.opening_inside = p_in
-            current_day.opening_cash_treasury = p_cash
-            current_day.opening_insta_treasury = p_insta
-            db.commit()
 
 is_closed = (current_day.status == "CLOSED")
 
@@ -111,7 +86,7 @@ time_slots = [
     "3:00 - 4:00", "3:00 - 4:30", "4:00 - 5:00", "5:00 - 6:00", "5:00 - 6:30",
     "6:00 - 7:00", "6:30 - 8:00", "7:00 - 8:00", "8:00 - 9:00", "8:00 - 9:30",
     "9:00 - 10:00", "9:30 - 11:00", "10:00 - 11:00", "10:00 - 11:30", "11:00 - 12:00",
-    "11:30 - 1:00", "12:00 - 1:00", "12:00 - 1:30" ,"1:00 - 2:00", "1:30 - 3:00", "2:00 - 3:00"
+    "11:30 - 1:00", "12:00 - 1:30", "1:00 - 2:00", "1:30 - 3:00", "2:00 - 3:00"
 ]
 
 if not is_closed:
@@ -214,17 +189,15 @@ else:
 st.markdown("---")
 
 # ==========================================
-# 3. إدارة الخارج (مع مربع مجمع للخارج)
+# 3. إدارة الخارج ومربعات التجميع
 # ==========================================
 st.subheader("💸 الخارج")
 
-# حساب مبالغ الخارج ومصادرها
 exp_inside = calculate_expenses_by_source(db, current_day.id, ExpenseSource.inside)
 exp_cash = calculate_expenses_by_source(db, current_day.id, ExpenseSource.cash_treasury)
 exp_insta = calculate_expenses_by_source(db, current_day.id, ExpenseSource.insta_treasury)
 total_exp = exp_inside + exp_cash + exp_insta
 
-# عدادات الخارج المجمعة
 ex_col1, ex_col2, ex_col3, ex_col4 = st.columns(4)
 ex_col1.metric("🔴 إجمالي الخارج", f"{total_exp:,.2f} ج.م")
 ex_col2.metric("من الداخل", f"{exp_inside:,.2f} ج.م")
@@ -282,7 +255,32 @@ if expenses:
 st.markdown("---")
 
 # ==========================================
-# 4. رصيد نهاية اليوم وإغلاق/إعادة فتح الوردية
+# 4. تغذية العهدة المباشرة في الوردية (جديد ومهم)
+# ==========================================
+if not is_closed:
+    with st.expander("🏦 ➕ إضافة تغذية للعهدة في هذه الوردية (كاش أو انستا)", expanded=False):
+        with st.form("quick_treasury_feed"):
+            tf_col1, tf_col2 = st.columns(2)
+            with tf_col1:
+                feed_type = st.selectbox("نوع العهدة المضافة", ["عهدة Cash", "عهدة Insta"])
+                feed_amt = st.number_input("المبلغ المضاف للعهدة", min_value=1.0, step=100.0)
+            with tf_col2:
+                feed_desc = st.text_input("بيان التغذية", value="تغذية عهدة للفرع")
+                
+            if st.form_submit_button("إضافة المبلغ للعهدة 💰", use_container_width=True):
+                tt_enum = TreasuryType.cash if feed_type == "عهدة Cash" else TreasuryType.insta
+                db.add(TreasuryMovement(
+                    business_day_id=current_day.id, treasury_type=tt_enum,
+                    movement_type=MovementType.addition, amount=feed_amt, description=feed_desc
+                ))
+                db.commit()
+                st.success(f"✅ تمت إضافة {feed_amt:,.2f} إلى {feed_type} بنجاح!")
+                st.rerun()
+
+st.markdown("---")
+
+# ==========================================
+# 5. رصيد نهاية اليوم وإغلاق/إعادة فتح الوردية
 # ==========================================
 st.subheader("📊 رصيد نهاية اليوم")
 
@@ -291,14 +289,17 @@ curr_cash_treasury = calculate_cash_treasury_balance(db, current_day.id)
 curr_insta_treasury = calculate_insta_treasury_balance(db, current_day.id)
 total_resp = calculate_total_responsibility(db, current_day.id)
 
+# توضيح الإضافات للعهدة اليوم إن وجدت
+cash_additions = calculate_treasury_net_movements(db, current_day.id, TreasuryType.cash)
+insta_additions = calculate_treasury_net_movements(db, current_day.id, TreasuryType.insta)
+
 rc1, rc2, rc3 = st.columns(3)
 rc1.info(f"**داخل:** {curr_inside:,.2f} ج.م")
-rc2.info(f"**عهدة كاش:** {curr_cash_treasury:,.2f} ج.م")
-rc3.info(f"**عهدة انستا:** {curr_insta_treasury:,.2f} ج.م")
+rc2.info(f"**عهدة كاش:** {curr_cash_treasury:,.2f} ج.م" + (f" (+{cash_additions} تغذية)" if cash_additions > 0 else ""))
+rc3.info(f"**عهدة انستا:** {curr_insta_treasury:,.2f} ج.م" + (f" (+{insta_additions} تغذية)" if insta_additions > 0 else ""))
 
 st.warning(f"### 🛡️ إجمالي العهد والمسؤولية: {total_resp:,.2f} ج.م")
 
-# التحكم في إغلاق وإعادة فتح الوردية
 if not is_closed:
     if st.button("🔒 إغلاق الوردية (تجميد الحسابات)", type="primary", use_container_width=True):
         current_day.status = "CLOSED"
