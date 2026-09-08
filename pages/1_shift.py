@@ -189,7 +189,7 @@ else:
 st.markdown("---")
 
 # ==========================================
-# 3. إدارة الخارج ومربعات التجميع
+# 3. إدارة الخارج ومربعات التجميع مع إمكانية التعديل
 # ==========================================
 st.subheader("💸 الخارج")
 
@@ -239,23 +239,66 @@ if not is_closed:
 expenses = db.query(Expense).filter(Expense.business_day_id == current_day.id).all()
 if expenses:
     for e in expenses:
-        col_ex1, col_ex2, col_ex3 = st.columns([3, 3, 1])
+        col_ex1, col_ex2, col_ex3, col_ex4 = st.columns([3, 3, 1, 1])
         col_ex1.write(f"👤 **{e.person_entity}** ({e.expense_type})")
         if e.description and e.description.strip():
             col_ex1.caption(f"📝 {e.description.strip()}")
             
         col_ex2.write(f"💸 {e.amount:,.2f} ج.م من ({e.source.value})")
+        
+        # أزرار التعديل والحذف للخارج
         if not is_closed:
-            if col_ex3.button("❌", key=f"del_exp_{e.id}"):
+            if col_ex3.button("✏️", key=f"edit_exp_btn_{e.id}"):
+                st.session_state['editing_expense_id'] = e.id
+                st.rerun()
+            if col_ex4.button("❌", key=f"del_exp_btn_{e.id}"):
                 db.delete(e)
                 db.commit()
                 st.rerun()
+
+        # نافذة تعديل المصروف
+        if st.session_state.get('editing_expense_id') == e.id:
+            with st.form(f"edit_exp_form_{e.id}"):
+                st.info(f"تعديل خارج: {e.person_entity} ({e.expense_type})")
+                ee_c1, ee_c2 = st.columns(2)
+                with ee_c1:
+                    emp_idx = emp_names.index(e.person_entity) if e.person_entity in emp_names else 0
+                    new_emp = st.selectbox("الموظف", emp_names, index=emp_idx)
+                    cat_idx = cat_names.index(e.expense_type) if e.expense_type in cat_names else 0
+                    new_cat = st.selectbox("نوع الخارج", cat_names, index=cat_idx)
+                    new_amt = st.number_input("المبلغ", min_value=0.0, value=float(e.amount), step=10.0)
+                with ee_c2:
+                    sources = ["الداخل", "عهدة كاش", "عهدة انستا"]
+                    src_idx = sources.index(e.source.value) if e.source.value in sources else 0
+                    new_src_str = st.selectbox("يُخصم من", sources, index=src_idx)
+                    new_notes = st.text_area("تفاصيل / ملاحظات", value=e.description or "")
+                    
+                col_save_exp, col_cancel_exp = st.columns(2)
+                if col_save_exp.form_submit_button("حفظ التعديل ✅", use_container_width=True):
+                    src_enum = ExpenseSource.inside
+                    if new_src_str == "عهدة كاش": src_enum = ExpenseSource.cash_treasury
+                    elif new_src_str == "عهدة انستا": src_enum = ExpenseSource.insta_treasury
+                    
+                    e.person_entity = new_emp
+                    e.expense_type = new_cat
+                    e.amount = new_amt
+                    e.source = src_enum
+                    e.description = new_notes
+                    db.commit()
+                    del st.session_state['editing_expense_id']
+                    st.success("تم تحديث الخارج بنجاح!")
+                    st.rerun()
+                    
+                if col_cancel_exp.form_submit_button("إلغاء ↩️", use_container_width=True):
+                    del st.session_state['editing_expense_id']
+                    st.rerun()
+
         st.divider()
 
 st.markdown("---")
 
 # ==========================================
-# 4. تغذية العهدة المباشرة في الوردية (جديد ومهم)
+# 4. تغذية العهدة المباشرة في الوردية
 # ==========================================
 if not is_closed:
     with st.expander("🏦 ➕ إضافة تغذية للعهدة في هذه الوردية (كاش أو انستا)", expanded=False):
@@ -289,7 +332,6 @@ curr_cash_treasury = calculate_cash_treasury_balance(db, current_day.id)
 curr_insta_treasury = calculate_insta_treasury_balance(db, current_day.id)
 total_resp = calculate_total_responsibility(db, current_day.id)
 
-# توضيح الإضافات للعهدة اليوم إن وجدت
 cash_additions = calculate_treasury_net_movements(db, current_day.id, TreasuryType.cash)
 insta_additions = calculate_treasury_net_movements(db, current_day.id, TreasuryType.insta)
 
