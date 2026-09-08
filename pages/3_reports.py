@@ -46,12 +46,14 @@ if not day_ids:
     st.info("لا توجد بيانات مسجلة في هذه الفترة.")
     st.stop()
 
+# خريطة تواريخ آمنة بالـ ID لحل مشكلة AttributeError نهائياً
+day_date_map = {d.id: d.business_date.strftime("%Y-%m-%d") for d in days}
+
 # ==========================================
-# 1. إجمالي الإيرادات (تشمل الاشتراكات والطلبات)
+# 1. إجمالي الإيرادات
 # ==========================================
 st.subheader("💰 إجمالي الإيرادات في الفترة")
 
-# تم إزالة شرط استبعاد الاشتراكات لجمع كل المبالغ
 orders = db.query(Order).filter(Order.business_day_id.in_(day_ids))
 cash_revenue_period = orders.filter(Order.payment_method == PaymentMethod.cash).with_entities(func.sum(Order.price)).scalar() or 0.0
 insta_revenue_period = orders.filter(Order.payment_method == PaymentMethod.insta).with_entities(func.sum(Order.price)).scalar() or 0.0
@@ -65,15 +67,15 @@ r3.metric("إجمالي الإيرادات", f"{total_revenue_period:,.2f} ج.م
 st.markdown("---")
 
 # ==========================================
-# 2. كشف حساب الموظفين (مع فلتر بالموظف والتاريخ)
+# 2. كشف حساب الموظفين (أين ذهبت مسحوبات كل موظف؟)
 # ==========================================
-st.subheader("👨‍🔧 كشف حساب الموظفين (السلف والمصروفات)")
+st.subheader("👨‍🔧 كشف حساب الموظفين ومسحوباتهم")
 
 expenses_period = db.query(Expense).filter(Expense.business_day_id.in_(day_ids)).all()
 
 if expenses_period:
     exp_list = [{
-        "التاريخ": e.business_day.business_date.strftime("%Y-%m-%d"),
+        "التاريخ": day_date_map.get(e.business_day_id, "غير محدد"),
         "الموظف": e.person_entity,
         "نوع الخارج": e.expense_type,
         "المبلغ": float(e.amount),
@@ -82,9 +84,8 @@ if expenses_period:
     } for e in expenses_period]
     
     df_exp = pd.DataFrame(exp_list)
-    
-    # قائمة بأسماء الموظفين للفلترة
     all_emp_names = sorted(list(df_exp["الموظف"].unique()))
+    
     selected_emp = st.selectbox("🔍 اختر الموظف لعرض كشف حسابه بالتفصيل:", ["عرض مجمع لكل الموظفين"] + all_emp_names)
     
     if selected_emp == "عرض مجمع لكل الموظفين":
@@ -98,8 +99,14 @@ if expenses_period:
         
         st.success(f"💼 إجمالي ما استلمه **{selected_emp}** في هذه الفترة: **{emp_total:,.2f} ج.م**")
         
-        # جدول تفصيلي بحركات الموظف وتواريخها
-        st.write(f"##### تفاصيل مسحوبات {selected_emp} بالتاريخ والسبب:")
+        # ملخص بنود الموظف
+        st.write("##### 📌 ملخص البنود التي سحبها:")
+        emp_summary = emp_df.groupby("نوع الخارج")["المبلغ"].sum().reset_index()
+        emp_summary.columns = ["بند الخارج", "المبلغ (ج.م)"]
+        st.dataframe(emp_summary, use_container_width=True, hide_index=True)
+        
+        # جدول تفصيلي بالأيام والتفاصيل
+        st.write("##### 📝 سجل الحركات بالتاريخ والسبب والمصدر:")
         st.dataframe(
             emp_df[["التاريخ", "نوع الخارج", "المبلغ", "المصدر", "ملاحظات"]],
             use_container_width=True,
@@ -111,9 +118,9 @@ else:
 st.markdown("---")
 
 # ==========================================
-# 3. تحليل بنود المصروفات العامة (بنزين، سكن...)
+# 3. إجمالي بنود المصروفات العامة (بنزين، سكن...)
 # ==========================================
-st.subheader("💸 أين ذهبت المصروفات؟ (إجمالي البنود)")
+st.subheader("💸 أين ذهبت المصروفات العامة؟ (إجمالي البنود)")
 
 if expenses_period:
     total_expenses_period = sum([float(e.amount) for e in expenses_period])
