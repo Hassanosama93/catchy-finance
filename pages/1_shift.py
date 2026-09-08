@@ -41,19 +41,18 @@ st.title(f"Shift - {st.session_state['current_region_name']}")
 
 selected_date = st.date_input("📅 تاريخ اليوم:", date.today())
 
-# 1. البحث عن يوم العمل المختار
+# البحث عن يوم العمل
 current_day = db.query(BusinessDay).filter(
     BusinessDay.region_id == region_id, BusinessDay.business_date == selected_date
 ).first()
 
-# البحث عن آخر يوم مغلق قبل هذا التاريخ لسحب أرصدته
+# البحث عن آخر يوم مغلق قبل هذا التاريخ
 prev_closed_day = db.query(BusinessDay).filter(
     BusinessDay.region_id == region_id,
     BusinessDay.business_date < selected_date,
     BusinessDay.status == "CLOSED"
 ).order_by(BusinessDay.business_date.desc()).first()
 
-# إذا لم يكن اليوم مسجلاً، نقوم بإنشائه وربطه بآخر تقفيل سابق
 if not current_day:
     current_day = BusinessDay(
         region_id=region_id, business_date=selected_date, status="OPEN",
@@ -64,7 +63,7 @@ if not current_day:
     db.add(current_day)
     db.commit()
 else:
-    # ميزة الترحيل الحي: لو اليوم مفتوح، يحدث رصيد بدايته أوتوماتيكياً لو اليوم السابق اتقفل مؤخراً!
+    # تحديث رصيد البداية تلقائياً لو اليوم مفتوح وتم تقفيل اليوم السابق
     if current_day.status == "OPEN" and prev_closed_day:
         p_in = prev_closed_day.closing_inside or 0.0
         p_cash = prev_closed_day.closing_cash_treasury or 0.0
@@ -215,9 +214,22 @@ else:
 st.markdown("---")
 
 # ==========================================
-# 3. إدارة الخارج
+# 3. إدارة الخارج (مع مربع مجمع للخارج)
 # ==========================================
 st.subheader("💸 الخارج")
+
+# حساب مبالغ الخارج ومصادرها
+exp_inside = calculate_expenses_by_source(db, current_day.id, ExpenseSource.inside)
+exp_cash = calculate_expenses_by_source(db, current_day.id, ExpenseSource.cash_treasury)
+exp_insta = calculate_expenses_by_source(db, current_day.id, ExpenseSource.insta_treasury)
+total_exp = exp_inside + exp_cash + exp_insta
+
+# عدادات الخارج المجمعة
+ex_col1, ex_col2, ex_col3, ex_col4 = st.columns(4)
+ex_col1.metric("🔴 إجمالي الخارج", f"{total_exp:,.2f} ج.م")
+ex_col2.metric("من الداخل", f"{exp_inside:,.2f} ج.م")
+ex_col3.metric("من عهدة كاش", f"{exp_cash:,.2f} ج.م")
+ex_col4.metric("من عهدة انستا", f"{exp_insta:,.2f} ج.م")
 
 employees = db.query(Employee).filter(Employee.is_active == True).all()
 emp_names = [e.name for e in employees] if employees else ["بدون موظف"]
@@ -286,6 +298,7 @@ rc3.info(f"**عهدة انستا:** {curr_insta_treasury:,.2f} ج.م")
 
 st.warning(f"### 🛡️ إجمالي العهد والمسؤولية: {total_resp:,.2f} ج.م")
 
+# التحكم في إغلاق وإعادة فتح الوردية
 if not is_closed:
     if st.button("🔒 إغلاق الوردية (تجميد الحسابات)", type="primary", use_container_width=True):
         current_day.status = "CLOSED"
