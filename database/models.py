@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Date, Enum, Numeric, DateTime
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -37,21 +37,16 @@ class BusinessDay(Base):
     id = Column(Integer, primary_key=True)
     region_id = Column(Integer, ForeignKey('regions.id'), nullable=False)
     business_date = Column(Date, nullable=False)
-    status = Column(String, default="OPEN") # OPEN or CLOSED
+    status = Column(String, default="OPEN")
     
-    # الأرصدة الافتتاحية
     opening_inside = Column(Numeric(10, 2), default=0.00)
     opening_cash_treasury = Column(Numeric(10, 2), default=0.00)
     opening_insta_treasury = Column(Numeric(10, 2), default=0.00)
     
-    # الأرصدة النهائية
     closing_inside = Column(Numeric(10, 2), nullable=True)
     closing_cash_treasury = Column(Numeric(10, 2), nullable=True)
     closing_insta_treasury = Column(Numeric(10, 2), nullable=True)
     closed_at = Column(DateTime, nullable=True)
-    
-    # ربط مباشر ومستحيل يضيع
-    region = relationship(Region)
 
 class Employee(Base):
     __tablename__ = 'employees'
@@ -76,8 +71,6 @@ class Order(Base):
     price = Column(Numeric(10, 2), default=0.00)
     payment_method = Column(Enum(PaymentMethod), nullable=False)
     notes = Column(String, nullable=True)
-    
-    business_day = relationship(BusinessDay)
 
 class Expense(Base):
     __tablename__ = 'expenses'
@@ -89,8 +82,6 @@ class Expense(Base):
     amount = Column(Numeric(10, 2), nullable=False)
     source = Column(Enum(ExpenseSource), nullable=False)
     notes = Column(String, nullable=True)
-    
-    business_day = relationship(BusinessDay)
 
 class TreasuryMovement(Base):
     __tablename__ = 'treasury_movements'
@@ -100,8 +91,6 @@ class TreasuryMovement(Base):
     movement_type = Column(Enum(MovementType), nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
     description = Column(String, nullable=True)
-    
-    business_day = relationship(BusinessDay)
 
 class AuditLog(Base):
     __tablename__ = 'audit_logs'
