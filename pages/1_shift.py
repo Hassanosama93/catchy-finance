@@ -15,9 +15,8 @@ st.markdown("""
 <style>
     @media (max-width: 768px) {
         .stButton>button {
-            min-height: 48px !important;
-            font-size: 16px !important;
-            width: 100% !important;
+            min-height: 44px !important;
+            font-size: 15px !important;
         }
         input, select, div[data-baseweb="select"] {
             min-height: 45px !important;
@@ -76,7 +75,7 @@ st.markdown("---")
 # ==========================================
 st.subheader("📋 الطلبات")
 
-# عدادات الإيراد
+# عدادات الإيراد اللحظية
 cash_rev = calculate_cash_revenue(db, current_day.id)
 insta_rev = calculate_insta_revenue(db, current_day.id)
 total_rev = calculate_total_revenue(db, current_day.id)
@@ -93,9 +92,9 @@ time_slots = [
     "11:30 - 1:00", "12:00 - 1:30", "1:00 - 2:00", "1:30 - 3:00", "2:00 - 3:00"
 ]
 
-# نموذج الإدخال السريع
+# نموذج إضافة طلب جديد
 if not is_closed:
-    with st.expander("➕ إضافة طلب جديد (سريع)", expanded=True):
+    with st.expander("➕ إضافة طلب جديد", expanded=True):
         with st.form("quick_order_form", clear_on_submit=True):
             o_col1, o_col2 = st.columns(2)
             with o_col1:
@@ -105,15 +104,13 @@ if not is_closed:
             with o_col2:
                 o_price = st.number_input("السعر (ج.م) 💵", min_value=0.0, step=10.0)
                 o_pay = st.selectbox("طريقة الدفع 💳", ["Cash", "Insta", "None"])
-                o_notes = st.text_input("ملاحظات (مثل: تجديد اشتراك / غسيل مجاني) 📝")
+                o_notes = st.text_input("ملاحظات 📝")
                 
             if st.form_submit_button("حفظ الطلب 💾", type="primary", use_container_width=True):
-                # ضبط طريقة الدفع
                 pm = PaymentMethod.none
                 if o_pay == "Cash": pm = PaymentMethod.cash
                 elif o_pay == "Insta": pm = PaymentMethod.insta
                 
-                # السعر يؤخذ كما هو ما دامت طريقة الدفع ليست None
                 real_price = float(o_price) if pm != PaymentMethod.none else 0.0
                     
                 db.add(Order(
@@ -129,20 +126,68 @@ if not is_closed:
                 st.success("تم حفظ الطلب بنجاح!")
                 st.rerun()
 
-# عرض الطلبات المسجلة اليوم
+# عرض الطلبات مرتبة زمنياً من الصغير للكبير
 orders = db.query(Order).filter(Order.business_day_id == current_day.id).all()
+
+# الترتيب حسب تسلسل القائمة time_slots
+orders.sort(key=lambda o: time_slots.index(o.order_time) if o.order_time in time_slots else 999)
+
 if orders:
     st.write(f"##### الطلبات المسجلة ({len(orders)} طلب):")
     for o in orders:
-        c_ord1, c_ord2, c_ord3, c_ord4 = st.columns([2, 3, 2, 1])
-        c_ord1.write(f"⏰ {o.order_time}")
-        c_ord2.write(f"👤 {o.customer_name} {'(اشتراك)' if o.is_subscription else ''}")
-        c_ord3.write(f"💰 {o.price:,.2f} ج.م ({o.payment_method.value})")
+        c_ord1, c_ord2, c_ord3, c_ord4 = st.columns([3, 3, 1, 1])
+        c_ord1.write(f"⏰ **{o.order_time}** | 👤 {o.customer_name} {'(اشتراك)' if o.is_subscription else ''}")
+        c_ord2.write(f"💰 {o.price:,.2f} ج.م ({o.payment_method.value})")
+        
         if not is_closed:
+            # زر التعديل
+            if c_ord3.button("✏️", key=f"edit_btn_{o.id}"):
+                st.session_state['editing_order_id'] = o.id
+                st.rerun()
+            # زر الحذف
             if c_ord4.button("❌", key=f"del_ord_{o.id}"):
                 db.delete(o)
                 db.commit()
                 st.rerun()
+
+        # نافذة التعديل السريع إذا ضغط المستخدم على ✏️
+        if st.session_state.get('editing_order_id') == o.id:
+            with st.form(f"edit_form_{o.id}"):
+                st.info(f"تعديل طلب: {o.customer_name}")
+                ed_c1, ed_c2 = st.columns(2)
+                with ed_c1:
+                    time_idx = time_slots.index(o.order_time) if o.order_time in time_slots else 0
+                    new_time = st.selectbox("الوقت", time_slots, index=time_idx)
+                    new_name = st.text_input("اسم العميل", value=o.customer_name)
+                    new_sub = st.checkbox("اشتراك", value=o.is_subscription)
+                with ed_c2:
+                    new_price = st.number_input("السعر", value=float(o.price), step=10.0)
+                    pay_options = ["Cash", "Insta", "None"]
+                    pay_idx = pay_options.index(o.payment_method.value) if o.payment_method.value in pay_options else 2
+                    new_pay = st.selectbox("طريقة الدفع", pay_options, index=pay_idx)
+                    new_notes = st.text_input("ملاحظات", value=o.notes or "")
+                    
+                col_save, col_cancel = st.columns(2)
+                if col_save.form_submit_button("حفظ التعديل ✅", use_container_width=True):
+                    pm = PaymentMethod.none
+                    if new_pay == "Cash": pm = PaymentMethod.cash
+                    elif new_pay == "Insta": pm = PaymentMethod.insta
+                    
+                    o.order_time = new_time
+                    o.customer_name = new_name.strip() if new_name else "بدون اسم"
+                    o.is_subscription = new_sub
+                    o.price = float(new_price) if pm != PaymentMethod.none else 0.0
+                    o.payment_method = pm
+                    o.notes = new_notes
+                    db.commit()
+                    del st.session_state['editing_order_id']
+                    st.success("تم تحديث الطلب بنجاح!")
+                    st.rerun()
+                    
+                if col_cancel.form_submit_button("إلغاء ↩️", use_container_width=True):
+                    del st.session_state['editing_order_id']
+                    st.rerun()
+                    
         st.divider()
 else:
     st.info("لا توجد طلبات مسجلة اليوم حتى الآن.")
