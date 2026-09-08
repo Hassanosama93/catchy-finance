@@ -41,22 +41,43 @@ st.title(f"Shift - {st.session_state['current_region_name']}")
 
 selected_date = st.date_input("📅 تاريخ اليوم:", date.today())
 
+# 1. البحث عن يوم العمل المختار
 current_day = db.query(BusinessDay).filter(
     BusinessDay.region_id == region_id, BusinessDay.business_date == selected_date
 ).first()
 
+# البحث عن آخر يوم مغلق قبل هذا التاريخ لسحب أرصدته
+prev_closed_day = db.query(BusinessDay).filter(
+    BusinessDay.region_id == region_id,
+    BusinessDay.business_date < selected_date,
+    BusinessDay.status == "CLOSED"
+).order_by(BusinessDay.business_date.desc()).first()
+
+# إذا لم يكن اليوم مسجلاً، نقوم بإنشائه وربطه بآخر تقفيل سابق
 if not current_day:
-    yesterday = selected_date - timedelta(days=1)
-    prev_day = db.query(BusinessDay).filter(BusinessDay.region_id == region_id, BusinessDay.business_date == yesterday).first()
-    
     current_day = BusinessDay(
         region_id=region_id, business_date=selected_date, status="OPEN",
-        opening_inside=prev_day.closing_inside if prev_day else 0.0,
-        opening_cash_treasury=prev_day.closing_cash_treasury if prev_day else 0.0,
-        opening_insta_treasury=prev_day.closing_insta_treasury if prev_day else 0.0
+        opening_inside=prev_closed_day.closing_inside if prev_closed_day else 0.0,
+        opening_cash_treasury=prev_closed_day.closing_cash_treasury if prev_closed_day else 0.0,
+        opening_insta_treasury=prev_closed_day.closing_insta_treasury if prev_closed_day else 0.0
     )
     db.add(current_day)
     db.commit()
+else:
+    # ميزة الترحيل الحي: لو اليوم مفتوح، يحدث رصيد بدايته أوتوماتيكياً لو اليوم السابق اتقفل مؤخراً!
+    if current_day.status == "OPEN" and prev_closed_day:
+        p_in = prev_closed_day.closing_inside or 0.0
+        p_cash = prev_closed_day.closing_cash_treasury or 0.0
+        p_insta = prev_closed_day.closing_insta_treasury or 0.0
+        
+        if (current_day.opening_inside != p_in or 
+            current_day.opening_cash_treasury != p_cash or 
+            current_day.opening_insta_treasury != p_insta):
+            
+            current_day.opening_inside = p_in
+            current_day.opening_cash_treasury = p_cash
+            current_day.opening_insta_treasury = p_insta
+            db.commit()
 
 is_closed = (current_day.status == "CLOSED")
 
@@ -78,7 +99,6 @@ st.markdown("---")
 # ==========================================
 st.subheader("📋 الطلبات")
 
-# عدادات الإيراد اللحظية
 cash_rev = calculate_cash_revenue(db, current_day.id)
 insta_rev = calculate_insta_revenue(db, current_day.id)
 total_rev = calculate_total_revenue(db, current_day.id)
@@ -95,7 +115,6 @@ time_slots = [
     "11:30 - 1:00", "12:00 - 1:00", "12:00 - 1:30" ,"1:00 - 2:00", "1:30 - 3:00", "2:00 - 3:00"
 ]
 
-# نموذج إضافة طلب جديد
 if not is_closed:
     with st.expander("➕ إضافة طلب جديد", expanded=True):
         with st.form("quick_order_form", clear_on_submit=True):
@@ -130,7 +149,6 @@ if not is_closed:
                 st.success("تم حفظ الطلب بنجاح!")
                 st.rerun()
 
-# عرض الطلبات مرتبة زمنياً
 orders = db.query(Order).filter(Order.business_day_id == current_day.id).all()
 orders.sort(key=lambda o: time_slots.index(o.order_time) if o.order_time in time_slots else 999)
 
@@ -138,8 +156,6 @@ if orders:
     st.write(f"##### الطلبات المسجلة ({len(orders)} طلب):")
     for o in orders:
         c_ord1, c_ord2, c_ord3, c_ord4 = st.columns([3, 3, 1, 1])
-        
-        # إظهار الاسم والاشتراك وتحته الملاحظة إن وجدت
         c_ord1.write(f"⏰ **{o.order_time}** | 👤 {o.customer_name} {'(اشتراك)' if o.is_subscription else ''}")
         if o.notes and o.notes.strip():
             c_ord1.caption(f"📝 {o.notes.strip()}")
@@ -155,7 +171,6 @@ if orders:
                 db.commit()
                 st.rerun()
 
-        # نافذة التعديل
         if st.session_state.get('editing_order_id') == o.id:
             with st.form(f"edit_form_{o.id}"):
                 st.info(f"تعديل طلب: {o.customer_name}")
@@ -271,7 +286,6 @@ rc3.info(f"**عهدة انستا:** {curr_insta_treasury:,.2f} ج.م")
 
 st.warning(f"### 🛡️ إجمالي العهد والمسؤولية: {total_resp:,.2f} ج.م")
 
-# التحكم في إغلاق وإعادة فتح الوردية
 if not is_closed:
     if st.button("🔒 إغلاق الوردية (تجميد الحسابات)", type="primary", use_container_width=True):
         current_day.status = "CLOSED"
