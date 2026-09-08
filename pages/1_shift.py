@@ -75,7 +75,7 @@ st.markdown("---")
 # ==========================================
 st.subheader("📋 الطلبات")
 
-# عدادات الإيراد اللحظية
+# عدادات الإيراد
 cash_rev = calculate_cash_revenue(db, current_day.id)
 insta_rev = calculate_insta_revenue(db, current_day.id)
 total_rev = calculate_total_revenue(db, current_day.id)
@@ -89,10 +89,10 @@ time_slots = [
     "3:00 - 4:00", "3:00 - 4:30", "4:00 - 5:00", "5:00 - 6:00", "5:00 - 6:30",
     "6:00 - 7:00", "6:30 - 8:00", "7:00 - 8:00", "8:00 - 9:00", "8:00 - 9:30",
     "9:00 - 10:00", "9:30 - 11:00", "10:00 - 11:00", "10:00 - 11:30", "11:00 - 12:00",
-    "11:30 - 1:00", "12:00 - 1:00" , "12:00 - 1:30", "1:00 - 2:00", "1:30 - 3:00", "2:00 - 3:00"
+    "11:30 - 1:00", "12:00 - 1:00", "12:00 - 1:30" ,"1:00 - 2:00", "1:30 - 3:00", "2:00 - 3:00"
 ]
 
-# نموذج إضافة طلب جديد
+# نموذج الإدخال السريع
 if not is_closed:
     with st.expander("➕ إضافة طلب جديد", expanded=True):
         with st.form("quick_order_form", clear_on_submit=True):
@@ -102,8 +102,10 @@ if not is_closed:
                 o_name = st.text_input("اسم العميل 👤")
                 o_sub = st.checkbox("☑️ اشتراك")
             with o_col2:
-                o_price = st.number_input("السعر (ج.م) 💵", min_value= 0, step=10.0)
-                o_pay = st.selectbox("طريقة الدفع 💳", ["Cash", "Insta", "None"])
+                # خانة السعر تبدأ فاضية تماماً لتسهيل الكتابة
+                o_price_input = st.number_input("السعر (ج.م) 💵", min_value=0, value=None, step=10, placeholder="اكتب السعر...")
+                # طريقة الدفع تبدأ بـ None افتراضياً
+                o_pay = st.selectbox("طريقة الدفع 💳", ["None", "Cash", "Insta"])
                 o_notes = st.text_input("ملاحظات 📝")
                 
             if st.form_submit_button("حفظ الطلب 💾", type="primary", use_container_width=True):
@@ -111,7 +113,9 @@ if not is_closed:
                 if o_pay == "Cash": pm = PaymentMethod.cash
                 elif o_pay == "Insta": pm = PaymentMethod.insta
                 
-                real_price = float(o_price) if pm != PaymentMethod.none else 0.0
+                # تحويل السعر إلى رقم
+                o_price = float(o_price_input) if o_price_input is not None else 0.0
+                real_price = o_price if pm != PaymentMethod.none else 0.0
                     
                 db.add(Order(
                     business_day_id=current_day.id,
@@ -128,8 +132,6 @@ if not is_closed:
 
 # عرض الطلبات مرتبة زمنياً من الصغير للكبير
 orders = db.query(Order).filter(Order.business_day_id == current_day.id).all()
-
-# الترتيب حسب تسلسل القائمة time_slots
 orders.sort(key=lambda o: time_slots.index(o.order_time) if o.order_time in time_slots else 999)
 
 if orders:
@@ -140,17 +142,15 @@ if orders:
         c_ord2.write(f"💰 {o.price:,.2f} ج.م ({o.payment_method.value})")
         
         if not is_closed:
-            # زر التعديل
             if c_ord3.button("✏️", key=f"edit_btn_{o.id}"):
                 st.session_state['editing_order_id'] = o.id
                 st.rerun()
-            # زر الحذف
             if c_ord4.button("❌", key=f"del_ord_{o.id}"):
                 db.delete(o)
                 db.commit()
                 st.rerun()
 
-        # نافذة التعديل السريع إذا ضغط المستخدم على ✏️
+        # نافذة التعديل السريع
         if st.session_state.get('editing_order_id') == o.id:
             with st.form(f"edit_form_{o.id}"):
                 st.info(f"تعديل طلب: {o.customer_name}")
@@ -161,9 +161,9 @@ if orders:
                     new_name = st.text_input("اسم العميل", value=o.customer_name)
                     new_sub = st.checkbox("اشتراك", value=o.is_subscription)
                 with ed_c2:
-                    new_price = st.number_input("السعر", value=float(o.price), step=10.0)
-                    pay_options = ["Cash", "Insta", "None"]
-                    pay_idx = pay_options.index(o.payment_method.value) if o.payment_method.value in pay_options else 2
+                    new_price = st.number_input("السعر", min_value=0, value=int(o.price), step=10)
+                    pay_options = ["None", "Cash", "Insta"]
+                    pay_idx = pay_options.index(o.payment_method.value) if o.payment_method.value in pay_options else 0
                     new_pay = st.selectbox("طريقة الدفع", pay_options, index=pay_idx)
                     new_notes = st.text_input("ملاحظات", value=o.notes or "")
                     
@@ -212,20 +212,22 @@ if not is_closed:
             with ec1:
                 expense_emp = st.selectbox("الموظف / الشخص", emp_names)
                 expense_type = st.selectbox("نوع الخارج", cat_names)
-                expense_amount = st.number_input("المبلغ", min_value=0.0, step=10.0)
+                # خانة مبلغ المصروف تبدأ فاضية تماماً أيضاً لتسهيل الكتابة
+                exp_amt_input = st.number_input("المبلغ", min_value=0, value=None, step=10, placeholder="اكتب المبلغ...")
             with ec2:
                 expense_source = st.selectbox("يُخصم من", ["الداخل", "عهدة كاش", "عهدة انستا"])
                 expense_notes = st.text_area("تفاصيل / ملاحظات")
                 
             if st.form_submit_button("تسجيل الخارج ⬇️", use_container_width=True):
-                if expense_amount > 0:
+                exp_amt = float(exp_amt_input) if exp_amt_input is not None else 0.0
+                if exp_amt > 0:
                     src = ExpenseSource.inside
                     if expense_source == "عهدة كاش": src = ExpenseSource.cash_treasury
                     elif expense_source == "عهدة انستا": src = ExpenseSource.insta_treasury
                     
                     db.add(Expense(
                         business_day_id=current_day.id, person_entity=expense_emp, expense_type=expense_type,
-                        amount=expense_amount, source=src, description=expense_notes
+                        amount=exp_amt, source=src, description=expense_notes
                     ))
                     db.commit()
                     st.rerun()
