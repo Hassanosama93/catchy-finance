@@ -95,7 +95,7 @@ time_slots = [
     "11:30 - 1:00", "12:00 - 1:00", "12:00 - 1:30" ,"1:00 - 2:00", "1:30 - 3:00", "2:00 - 3:00"
 ]
 
-# نموذج إضافة طلب جديد (يظهر فقط إذا كان اليوم مفتوحاً)
+# نموذج إضافة طلب جديد
 if not is_closed:
     with st.expander("➕ إضافة طلب جديد", expanded=True):
         with st.form("quick_order_form", clear_on_submit=True):
@@ -138,10 +138,14 @@ if orders:
     st.write(f"##### الطلبات المسجلة ({len(orders)} طلب):")
     for o in orders:
         c_ord1, c_ord2, c_ord3, c_ord4 = st.columns([3, 3, 1, 1])
+        
+        # إظهار الاسم والاشتراك وتحته الملاحظة إن وجدت
         c_ord1.write(f"⏰ **{o.order_time}** | 👤 {o.customer_name} {'(اشتراك)' if o.is_subscription else ''}")
+        if o.notes and o.notes.strip():
+            c_ord1.caption(f"📝 {o.notes.strip()}")
+            
         c_ord2.write(f"💰 {o.price:,.2f} ج.م ({o.payment_method.value})")
         
-        # زراير التعديل والحذف تظهر فقط لو اليوم مفتوح
         if not is_closed:
             if c_ord3.button("✏️", key=f"edit_btn_{o.id}"):
                 st.session_state['editing_order_id'] = o.id
@@ -237,6 +241,9 @@ if expenses:
     for e in expenses:
         col_ex1, col_ex2, col_ex3 = st.columns([3, 3, 1])
         col_ex1.write(f"👤 **{e.person_entity}** ({e.expense_type})")
+        if e.description and e.description.strip():
+            col_ex1.caption(f"📝 {e.description.strip()}")
+            
         col_ex2.write(f"💸 {e.amount:,.2f} ج.م من ({e.source.value})")
         if not is_closed:
             if col_ex3.button("❌", key=f"del_exp_{e.id}"):
