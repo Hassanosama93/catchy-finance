@@ -102,7 +102,7 @@ if not is_closed:
                 o_name = st.text_input("اسم العميل 👤")
                 o_sub = st.checkbox("☑️ اشتراك")
             with o_col2:
-                o_price = st.number_input("السعر (ج.م) 💵", min_value= , step=10.0)
+                o_price = st.number_input("السعر (ج.م) 💵", min_value= 0, step=10.0)
                 o_pay = st.selectbox("طريقة الدفع 💳", ["Cash", "Insta", "None"])
                 o_notes = st.text_input("ملاحظات 📝")
                 
