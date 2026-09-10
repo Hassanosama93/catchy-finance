@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, timedelta
+from datetime import date
 from database.connection import get_db
 from database.models import Order, Expense, PaymentMethod, ExpenseSource, BusinessDay, Employee, ExpenseCategory, TreasuryMovement, TreasuryType, MovementType
 from services.calculations import (
@@ -10,29 +10,37 @@ from services.calculations import (
     calculate_total_responsibility, calculate_treasury_net_movements
 )
 
-# كود CSS مخصص للموبايل
+# كود CSS للموبايل والأرقام الصحيحة
 st.markdown("""
 <style>
-    @media (max-width: 768px) {
-        .stButton>button { min-height: 44px !important; font-size: 15px !important; }
-        input, select, div[data-baseweb="select"] { min-height: 45px !important; font-size: 16px !important; }
-        div[data-testid="column"] { flex: 1 1 calc(50% - 10px) !important; min-width: 130px !important; }
+    @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap');
+    * { font-family: 'Tajawal', sans-serif !important; }
+    [data-testid="collapsedControl"] { display: none !important; }
+    .block-container { padding: 1rem 0.8rem 3rem 0.8rem !important; }
+    div[data-testid="metric-container"] {
+        background: #181c24; border: 1px solid #2d3748; padding: 10px !important; border-radius: 10px !important;
     }
+    div[data-testid="stMetricValue"] { font-size: 20px !important; font-weight: 800 !important; color: #00d2ff !important; }
+    div[data-testid="stMetricLabel"] { font-size: 12px !important; color: #a0aec0 !important; }
+    div[data-testid="column"] { flex: 1 1 calc(33% - 6px) !important; min-width: 95px !important; }
 </style>
 """, unsafe_allow_html=True)
 
 if 'current_region_id' not in st.session_state:
-    st.warning("الرجاء اختيار المنطقة من الصفحة الرئيسية أولاً.")
+    st.warning("الرجاء اختيار الفرع أولاً.")
     st.stop()
 
 region_id = st.session_state['current_region_id']
 db = next(get_db())
 
-st.title(f"Shift - {st.session_state['current_region_name']}")
+# شريط علوي سريع
+nav_c1, nav_c2, nav_c3 = st.columns([2, 1, 1])
+nav_c1.markdown(f"<h4 style='margin:0; color:#00d2ff;'>Shift - {st.session_state['current_region_name']}</h4>", unsafe_allow_html=True)
+if nav_c2.button("📊 تقارير"): st.switch_page("pages/3_reports.py")
+if nav_c3.button("🏠 الرئيسية"): st.switch_page("app.py")
 
-selected_date = st.date_input("📅 تاريخ اليوم:", date.today())
+selected_date = st.date_input("📅 التاريخ:", date.today())
 
-# جلب أو إنشاء اليوم
 current_day = db.query(BusinessDay).filter(
     BusinessDay.region_id == region_id, BusinessDay.business_date == selected_date
 ).first()
@@ -52,35 +60,43 @@ if not current_day:
     )
     db.add(current_day)
     db.commit()
+else:
+    if current_day.status == "OPEN" and prev_closed_day:
+        p_in = prev_closed_day.closing_inside or 0.0
+        p_cash = prev_closed_day.closing_cash_treasury or 0.0
+        p_insta = prev_closed_day.closing_insta_treasury or 0.0
+        if (current_day.opening_inside != p_in or current_day.opening_cash_treasury != p_cash or current_day.opening_insta_treasury != p_insta):
+            current_day.opening_inside = p_in
+            current_day.opening_cash_treasury = p_cash
+            current_day.opening_insta_treasury = p_insta
+            db.commit()
 
 is_closed = (current_day.status == "CLOSED")
 
-if is_closed:
-    st.info("🔒 هذه الوردية مغلقة حالياً. (يمكنك إعادة فتحها للتعديل من زر أسفل الصفحة)")
-
 # ==========================================
-# 1. رصيد بداية اليوم
+# 1. رصيد بداية اليوم (كروت مضغوطة أرقام صحيحة)
 # ==========================================
-st.subheader("🌅 رصيد بداية اليوم")
+st.caption("🌅 أرصدة البداية:")
 col_b1, col_b2, col_b3 = st.columns(3)
-col_b1.metric("الداخل", f"{current_day.opening_inside:,.2f} ج.م")
-col_b2.metric("عهدة كاش", f"{current_day.opening_cash_treasury:,.2f} ج.م")
-col_b3.metric("عهدة انستا", f"{current_day.opening_insta_treasury:,.2f} ج.م")
+col_b1.metric("الداخل", f"{int(current_day.opening_inside or 0):,}")
+col_b2.metric("عهدة كاش", f"{int(current_day.opening_cash_treasury or 0):,}")
+col_b3.metric("عهدة انستا", f"{int(current_day.opening_insta_treasury or 0):,}")
+
 st.markdown("---")
 
 # ==========================================
-# 2. قسم الطلبات
+# 2. الطلبات والإيرادات
 # ==========================================
-st.subheader("📋 الطلبات")
+st.caption("📋 الطلبات وإيراد اليوم:")
 
 cash_rev = calculate_cash_revenue(db, current_day.id)
 insta_rev = calculate_insta_revenue(db, current_day.id)
 total_rev = calculate_total_revenue(db, current_day.id)
 
 rev1, rev2, rev3 = st.columns(3)
-rev1.metric("كاش", f"{cash_rev:,.2f} ج.م")
-rev2.metric("انستا", f"{insta_rev:,.2f} ج.م")
-rev3.metric("الإجمالي", f"{total_rev:,.2f} ج.م")
+rev1.metric("كاش", f"{int(cash_rev):,}")
+rev2.metric("انستا", f"{int(insta_rev):,}")
+rev3.metric("الإجمالي", f"{int(total_rev):,}")
 
 time_slots = [
     "3:00 - 4:00", "3:00 - 4:30", "4:00 - 5:00", "5:00 - 6:00", "5:00 - 6:30",
@@ -90,7 +106,7 @@ time_slots = [
 ]
 
 if not is_closed:
-    with st.expander("➕ إضافة طلب جديد", expanded=True):
+    with st.expander("➕ تسجيل طلب جديد", expanded=False):
         with st.form("quick_order_form", clear_on_submit=True):
             o_col1, o_col2 = st.columns(2)
             with o_col1:
@@ -98,7 +114,7 @@ if not is_closed:
                 o_name = st.text_input("اسم العميل 👤")
                 o_sub = st.checkbox("☑️ اشتراك")
             with o_col2:
-                o_price_input = st.number_input("السعر (ج.م) 💵", min_value=0, value=None, step=10, placeholder="اكتب السعر...")
+                o_price_input = st.number_input("السعر 💵", min_value=0, value=None, step=10, placeholder="اكتب السعر...")
                 o_pay = st.selectbox("طريقة الدفع 💳", ["None", "Cash", "Insta"])
                 o_notes = st.text_input("ملاحظات 📝")
                 
@@ -111,31 +127,22 @@ if not is_closed:
                 real_price = o_price if pm != PaymentMethod.none else 0.0
                     
                 db.add(Order(
-                    business_day_id=current_day.id,
-                    order_time=o_time,
+                    business_day_id=current_day.id, order_time=o_time,
                     customer_name=o_name.strip() if o_name else "بدون اسم",
-                    is_subscription=o_sub,
-                    price=real_price,
-                    payment_method=pm,
-                    notes=o_notes
+                    is_subscription=o_sub, price=real_price, payment_method=pm, notes=o_notes
                 ))
                 db.commit()
-                st.success("تم حفظ الطلب بنجاح!")
                 st.rerun()
 
 orders = db.query(Order).filter(Order.business_day_id == current_day.id).all()
 orders.sort(key=lambda o: time_slots.index(o.order_time) if o.order_time in time_slots else 999)
 
 if orders:
-    st.write(f"##### الطلبات المسجلة ({len(orders)} طلب):")
     for o in orders:
-        c_ord1, c_ord2, c_ord3, c_ord4 = st.columns([3, 3, 1, 1])
-        c_ord1.write(f"⏰ **{o.order_time}** | 👤 {o.customer_name} {'(اشتراك)' if o.is_subscription else ''}")
-        if o.notes and o.notes.strip():
-            c_ord1.caption(f"📝 {o.notes.strip()}")
-            
-        c_ord2.write(f"💰 {o.price:,.2f} ج.م ({o.payment_method.value})")
-        
+        c_ord1, c_ord2, c_ord3, c_ord4 = st.columns([3, 2, 1, 1])
+        c_ord1.write(f"⏰ **{o.order_time}** | {o.customer_name} {'(اشتراك)' if o.is_subscription else ''}")
+        if o.notes and o.notes.strip(): c_ord1.caption(f"📝 {o.notes.strip()}")
+        c_ord2.write(f"💰 {int(o.price):,} ({o.payment_method.value})")
         if not is_closed:
             if c_ord3.button("✏️", key=f"edit_btn_{o.id}"):
                 st.session_state['editing_order_id'] = o.id
@@ -147,7 +154,6 @@ if orders:
 
         if st.session_state.get('editing_order_id') == o.id:
             with st.form(f"edit_form_{o.id}"):
-                st.info(f"تعديل طلب: {o.customer_name}")
                 ed_c1, ed_c2 = st.columns(2)
                 with ed_c1:
                     time_idx = time_slots.index(o.order_time) if o.order_time in time_slots else 0
@@ -158,15 +164,14 @@ if orders:
                     new_price = st.number_input("السعر", min_value=0, value=int(o.price), step=10)
                     pay_options = ["None", "Cash", "Insta"]
                     pay_idx = pay_options.index(o.payment_method.value) if o.payment_method.value in pay_options else 0
-                    new_pay = st.selectbox("طريقة الدفع", pay_options, index=pay_idx)
+                    new_pay = st.selectbox("الدفع", pay_options, index=pay_idx)
                     new_notes = st.text_input("ملاحظات", value=o.notes or "")
                     
                 col_save, col_cancel = st.columns(2)
-                if col_save.form_submit_button("حفظ التعديل ✅", use_container_width=True):
+                if col_save.form_submit_button("حفظ ✅", use_container_width=True):
                     pm = PaymentMethod.none
                     if new_pay == "Cash": pm = PaymentMethod.cash
                     elif new_pay == "Insta": pm = PaymentMethod.insta
-                    
                     o.order_time = new_time
                     o.customer_name = new_name.strip() if new_name else "بدون اسم"
                     o.is_subscription = new_sub
@@ -175,23 +180,18 @@ if orders:
                     o.notes = new_notes
                     db.commit()
                     del st.session_state['editing_order_id']
-                    st.success("تم تحديث الطلب بنجاح!")
                     st.rerun()
-                    
                 if col_cancel.form_submit_button("إلغاء ↩️", use_container_width=True):
                     del st.session_state['editing_order_id']
                     st.rerun()
-                    
         st.divider()
-else:
-    st.info("لا توجد طلبات مسجلة اليوم حتى الآن.")
 
 st.markdown("---")
 
 # ==========================================
-# 3. إدارة الخارج ومربعات التجميع مع إمكانية التعديل
+# 3. الخارج
 # ==========================================
-st.subheader("💸 الخارج")
+st.caption("💸 مصاريف وخارج اليوم:")
 
 exp_inside = calculate_expenses_by_source(db, current_day.id, ExpenseSource.inside)
 exp_cash = calculate_expenses_by_source(db, current_day.id, ExpenseSource.cash_treasury)
@@ -199,10 +199,10 @@ exp_insta = calculate_expenses_by_source(db, current_day.id, ExpenseSource.insta
 total_exp = exp_inside + exp_cash + exp_insta
 
 ex_col1, ex_col2, ex_col3, ex_col4 = st.columns(4)
-ex_col1.metric("🔴 إجمالي الخارج", f"{total_exp:,.2f} ج.م")
-ex_col2.metric("من الداخل", f"{exp_inside:,.2f} ج.م")
-ex_col3.metric("من عهدة كاش", f"{exp_cash:,.2f} ج.م")
-ex_col4.metric("من عهدة انستا", f"{exp_insta:,.2f} ج.م")
+ex_col1.metric("إجمالي الخارج", f"{int(total_exp):,}")
+ex_col2.metric("من الداخل", f"{int(exp_inside):,}")
+ex_col3.metric("عهدة كاش", f"{int(exp_cash):,}")
+ex_col4.metric("عهدة انستا", f"{int(exp_insta):,}")
 
 employees = db.query(Employee).filter(Employee.is_active == True).all()
 emp_names = [e.name for e in employees] if employees else ["بدون موظف"]
@@ -211,7 +211,7 @@ categories = db.query(ExpenseCategory).filter(ExpenseCategory.is_active == True)
 cat_names = [c.name for c in categories] if categories else ["عام"]
 
 if not is_closed:
-    with st.expander("➕ إضافة خارج جديد", expanded=False):
+    with st.expander("➕ تسجيل خارج جديد", expanded=False):
         with st.form("expense_form", clear_on_submit=True):
             ec1, ec2 = st.columns(2)
             with ec1:
@@ -239,14 +239,10 @@ if not is_closed:
 expenses = db.query(Expense).filter(Expense.business_day_id == current_day.id).all()
 if expenses:
     for e in expenses:
-        col_ex1, col_ex2, col_ex3, col_ex4 = st.columns([3, 3, 1, 1])
+        col_ex1, col_ex2, col_ex3, col_ex4 = st.columns([3, 2, 1, 1])
         col_ex1.write(f"👤 **{e.person_entity}** ({e.expense_type})")
-        if e.description and e.description.strip():
-            col_ex1.caption(f"📝 {e.description.strip()}")
-            
-        col_ex2.write(f"💸 {e.amount:,.2f} ج.م من ({e.source.value})")
-        
-        # أزرار التعديل والحذف للخارج
+        if e.description and e.description.strip(): col_ex1.caption(f"📝 {e.description.strip()}")
+        col_ex2.write(f"💸 {int(e.amount):,} ({e.source.value})")
         if not is_closed:
             if col_ex3.button("✏️", key=f"edit_exp_btn_{e.id}"):
                 st.session_state['editing_expense_id'] = e.id
@@ -256,108 +252,93 @@ if expenses:
                 db.commit()
                 st.rerun()
 
-        # نافذة تعديل المصروف
         if st.session_state.get('editing_expense_id') == e.id:
             with st.form(f"edit_exp_form_{e.id}"):
-                st.info(f"تعديل خارج: {e.person_entity} ({e.expense_type})")
                 ee_c1, ee_c2 = st.columns(2)
                 with ee_c1:
                     emp_idx = emp_names.index(e.person_entity) if e.person_entity in emp_names else 0
                     new_emp = st.selectbox("الموظف", emp_names, index=emp_idx)
                     cat_idx = cat_names.index(e.expense_type) if e.expense_type in cat_names else 0
-                    new_cat = st.selectbox("نوع الخارج", cat_names, index=cat_idx)
-                    new_amt = st.number_input("المبلغ", min_value=0.0, value=float(e.amount), step=10.0)
+                    new_cat = st.selectbox("النوع", cat_names, index=cat_idx)
+                    new_amt = st.number_input("المبلغ", min_value=0, value=int(e.amount), step=10)
                 with ee_c2:
                     sources = ["الداخل", "عهدة كاش", "عهدة انستا"]
                     src_idx = sources.index(e.source.value) if e.source.value in sources else 0
-                    new_src_str = st.selectbox("يُخصم من", sources, index=src_idx)
-                    new_notes = st.text_area("تفاصيل / ملاحظات", value=e.description or "")
+                    new_src_str = st.selectbox("المصدر", sources, index=src_idx)
+                    new_notes = st.text_area("ملاحظات", value=e.description or "")
                     
                 col_save_exp, col_cancel_exp = st.columns(2)
-                if col_save_exp.form_submit_button("حفظ التعديل ✅", use_container_width=True):
+                if col_save_exp.form_submit_button("حفظ ✅", use_container_width=True):
                     src_enum = ExpenseSource.inside
                     if new_src_str == "عهدة كاش": src_enum = ExpenseSource.cash_treasury
                     elif new_src_str == "عهدة انستا": src_enum = ExpenseSource.insta_treasury
-                    
                     e.person_entity = new_emp
                     e.expense_type = new_cat
-                    e.amount = new_amt
+                    e.amount = float(new_amt)
                     e.source = src_enum
                     e.description = new_notes
                     db.commit()
                     del st.session_state['editing_expense_id']
-                    st.success("تم تحديث الخارج بنجاح!")
                     st.rerun()
-                    
                 if col_cancel_exp.form_submit_button("إلغاء ↩️", use_container_width=True):
                     del st.session_state['editing_expense_id']
                     st.rerun()
-
         st.divider()
 
 st.markdown("---")
 
 # ==========================================
-# 4. تغذية العهدة المباشرة في الوردية
+# 4. تغذية العهدة
 # ==========================================
 if not is_closed:
-    with st.expander("🏦 ➕ إضافة تغذية للعهدة في هذه الوردية (كاش أو انستا)", expanded=False):
+    with st.expander("🏦 ➕ تغذية العهدة (إضافة رصيد)", expanded=False):
         with st.form("quick_treasury_feed"):
             tf_col1, tf_col2 = st.columns(2)
             with tf_col1:
-                feed_type = st.selectbox("نوع العهدة المضافة", ["عهدة Cash", "عهدة Insta"])
-                feed_amt = st.number_input("المبلغ المضاف للعهدة", min_value=1.0, step=100.0)
+                feed_type = st.selectbox("العهدة المضافة", ["عهدة Cash", "عهدة Insta"])
+                feed_amt = st.number_input("المبلغ", min_value=1, step=100)
             with tf_col2:
-                feed_desc = st.text_input("بيان التغذية", value="تغذية عهدة للفرع")
-                
-            if st.form_submit_button("إضافة المبلغ للعهدة 💰", use_container_width=True):
+                feed_desc = st.text_input("البيان", value="تغذية عهدة")
+            if st.form_submit_button("إضافة المبلغ 💰", use_container_width=True):
                 tt_enum = TreasuryType.cash if feed_type == "عهدة Cash" else TreasuryType.insta
                 db.add(TreasuryMovement(
                     business_day_id=current_day.id, treasury_type=tt_enum,
-                    movement_type=MovementType.addition, amount=feed_amt, description=feed_desc
+                    movement_type=MovementType.addition, amount=float(feed_amt), description=feed_desc
                 ))
                 db.commit()
-                st.success(f"✅ تمت إضافة {feed_amt:,.2f} إلى {feed_type} بنجاح!")
                 st.rerun()
 
 st.markdown("---")
 
 # ==========================================
-# 5. رصيد نهاية اليوم وإغلاق/إعادة فتح الوردية
+# 5. رصيد نهاية اليوم
 # ==========================================
-st.subheader("📊 رصيد نهاية اليوم")
+st.caption("📊 الأرصدة الحالية (التقفيل):")
 
 curr_inside = calculate_inside_balance(db, current_day.id)
 curr_cash_treasury = calculate_cash_treasury_balance(db, current_day.id)
 curr_insta_treasury = calculate_insta_treasury_balance(db, current_day.id)
 total_resp = calculate_total_responsibility(db, current_day.id)
 
-cash_additions = calculate_treasury_net_movements(db, current_day.id, TreasuryType.cash)
-insta_additions = calculate_treasury_net_movements(db, current_day.id, TreasuryType.insta)
-
 rc1, rc2, rc3 = st.columns(3)
-rc1.info(f"**داخل:** {curr_inside:,.2f} ج.م")
-rc2.info(f"**عهدة كاش:** {curr_cash_treasury:,.2f} ج.م" + (f" (+{cash_additions} تغذية)" if cash_additions > 0 else ""))
-rc3.info(f"**عهدة انستا:** {curr_insta_treasury:,.2f} ج.م" + (f" (+{insta_additions} تغذية)" if insta_additions > 0 else ""))
+rc1.info(f"**الداخل:** {int(curr_inside):,}")
+rc2.info(f"**عهدة كاش:** {int(curr_cash_treasury):,}")
+rc3.info(f"**عهدة انستا:** {int(curr_insta_treasury):,}")
 
-st.warning(f"### 🛡️ إجمالي العهد والمسؤولية: {total_resp:,.2f} ج.م")
+st.warning(f"🛡️ **إجمالي العهد والمسؤولية:** {int(total_resp):,} ج.م")
 
 if not is_closed:
-    if st.button("🔒 إغلاق الوردية (تجميد الحسابات)", type="primary", use_container_width=True):
+    if st.button("🔒 إغلاق الوردية (تجميد)", type="primary", use_container_width=True):
         current_day.status = "CLOSED"
         current_day.closing_inside = curr_inside
         current_day.closing_cash_treasury = curr_cash_treasury
         current_day.closing_insta_treasury = curr_insta_treasury
         db.commit()
-        st.success("تم إغلاق الوردية بنجاح!")
         st.rerun()
 else:
-    st.write("---")
-    st.warning("⚠️ هذه الوردية مغلقة. إذا أردت تعديل أي طلب أو مصروف، اضغط على الزر التالي لإعادة فتحها:")
     if st.button("🔓 إعادة فتح الوردية للتعديل", type="secondary", use_container_width=True):
         current_day.status = "OPEN"
         db.commit()
-        st.success("تم إعادة فتح الوردية بنجاح! يمكنك الآن التعديل وإعادة الإغلاق.")
         st.rerun()
 
 db.close()
